@@ -1,0 +1,42 @@
+# ---------- 依赖 ----------
+node_modules/
+.pnpm-store/
+
+# ---------- 构建产物 ----------
+dist/
+dist-ssr/
+*.tsbuildinfo
+
+# ---------- 本地环境 ----------
+.env
+.env.*
+!.env.example
+*.local
+
+# ---------- 日志 ----------
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---------- 编辑器 / 系统 ----------
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------- 测试 / 缓存 ----------
+coverage/
+.cache/
+.vite/
+playwright-report/
+test-results/
+
+# ---------- 临时产物 ----------
+preview/
+.shots/
+*.pem
