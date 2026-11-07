@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { Pause, Play, RotateCcw } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 
 /* ============================================================
@@ -21,11 +20,8 @@ const PAL = [
   "#00B5CE",
   "#7B61FF",
   "#1BC47D",
-  "#FF7262",
-  "#18A0FB",
-  "#F7B500",
 ];
-const NAMES = ["Lei", "Ada", "Kai", "Momo", "Ren", "Yuki", "Sol", "Nova", "Jin", "Mia", "Theo", "Lina"];
+const NAMES = ["Lei", "Ada", "Kai", "Momo", "Ren", "Yuki", "Sol", "Nova", "Jin"];
 
 const TYPE_TEXT = "bento";
 const TYPE_START = 2.32;
@@ -38,8 +34,8 @@ const FRAME_DUR = 0.6;
 const REVEAL_DUR = 0.5;
 const WAVE_GAP = 0.45;
 const TRAVEL = 0.36;
-const T_TOTAL = 5.45;
-const EXIT_FADE = 1;
+const T_TOTAL = 5.05;
+const EXIT_FADE = 0.6;
 
 const WORKER_COUNT = PAL.length;
 const BOARD_CURSOR = WORKER_COUNT - 1;
@@ -58,7 +54,7 @@ const DRIFT_SPEED = PAL.map((_, i) => 9 + (i % 4) * 2.5);
 
 export type IntroPhase = "intro" | "burst" | "board" | "build";
 
-type Tool = "arrow" | "cross" | "ibeam";
+type Tool = "arrow" | "ibeam";
 
 interface Rect {
   x: number;
@@ -73,18 +69,11 @@ interface BuildJob extends Rect {
   dur: number;
   kind: "frame" | "reveal";
   diagonal: boolean;
+  /** 绘制方向：非对角线块用 ltr/rtl/ttb/btt，拼图块用 tl/tr/bl/br */
+  dir: string;
   text: boolean;
   chars: number;
   cursor: number;
-  rippled: boolean;
-}
-
-interface Ripple {
-  x: number;
-  y: number;
-  color: string;
-  born: number;
-  size: number;
 }
 
 interface Scene {
@@ -92,12 +81,10 @@ interface Scene {
   width: number;
   height: number;
   shell: HTMLElement;
-  logo: HTMLElement | null;
   typing: HTMLElement | null;
   frame: Rect | null;
   jobs: BuildJob[];
   byCursor: BuildJob[][];
-  ripples: Ripple[];
 }
 
 interface Pose {
@@ -149,23 +136,6 @@ function drawArrow(ctx: CanvasRenderingContext2D) {
   ctx.lineTo(7.4, 12.4);
   ctx.lineTo(13.2, 12.4);
   ctx.closePath();
-}
-
-function drawCross(ctx: CanvasRenderingContext2D) {
-  for (const [w, color] of [
-    [4, "#FFFFFF"],
-    [1.6, "#111111"],
-  ] as const) {
-    ctx.lineWidth = w;
-    ctx.strokeStyle = color;
-    ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(0, -9);
-    ctx.lineTo(0, 9);
-    ctx.moveTo(-9, 0);
-    ctx.lineTo(9, 0);
-    ctx.stroke();
-  }
 }
 
 function drawIBeam(ctx: CanvasRenderingContext2D) {
@@ -302,7 +272,10 @@ function drawCursor(
   ctx.shadowOffsetY = pose.down ? 1 : 1.6;
   ctx.lineJoin = "round";
 
-  if (pose.tool === "arrow") {
+  if (pose.tool === "ibeam") {
+    drawIBeam(ctx);
+    ctx.shadowColor = "transparent";
+  } else {
     if (pose.down) ctx.scale(0.93, 0.93);
     drawArrow(ctx);
     ctx.fillStyle = color;
@@ -311,21 +284,6 @@ function drawCursor(
     ctx.lineWidth = 1.4;
     ctx.strokeStyle = "#FFFFFF";
     ctx.stroke();
-  } else {
-    if (pose.tool === "ibeam") {
-      drawIBeam(ctx);
-    } else {
-      drawCross(ctx);
-    }
-    ctx.shadowColor = "transparent";
-    if (pose.down) {
-      ctx.globalAlpha = pose.alpha * 0.5;
-      ctx.beginPath();
-      ctx.arc(0, 0, 13, 0, Math.PI * 2);
-      ctx.fillStyle = color;
-      ctx.fill();
-      ctx.globalAlpha = pose.alpha;
-    }
   }
   ctx.restore();
 
@@ -345,18 +303,35 @@ function drawCursor(
 }
 
 /* ------------------------------ 位置模型 ------------------------------ */
-function orbitPose(index: number, t: number, w: number, h: number) {
+/**
+ * 开场游走：光标只在屏幕正中的 50% 区域里随机漂浮
+ * 每只光标的相位与频率由 index 派生的伪随机数决定，因此轨迹互不相同，
+ * 又保持纯函数（可随滚轮回退复现）。
+ */
+function wanderPose(index: number, t: number, w: number, h: number) {
   const cx = w / 2;
   const cy = h / 2;
-  const g = index % 6;
-  const row = Math.floor(index / 6);
-  const angle = g * 1.0472 + t * (g % 2 ? 1 : -1) * 1.35;
-  const radius = 96 + (g % 3) * 30 + Math.sin(t * 1.7 + g) * 10;
-  const tangent = angle + Math.PI / 2;
+  const rw = w * 0.25;
+  const rh = h * 0.25;
+
+  const seed = (n: number) => {
+    const v = Math.sin(index * 127.1 + n * 311.7) * 43758.5453;
+    return v - Math.floor(v);
+  };
+
+  const a1 = seed(1) * Math.PI * 2;
+  const a2 = seed(2) * Math.PI * 2;
+  const a3 = seed(3) * Math.PI * 2;
+  const f1 = 0.34 + seed(4) * 0.3;
+  const f2 = 0.2 + seed(5) * 0.26;
+
+  const x = cx + Math.sin(t * f1 + a1) * rw * 0.62 + Math.sin(t * f2 * 1.9 + a3) * rw * 0.2;
+  const y = cy + Math.cos(t * f2 + a2) * rh * 0.62 + Math.cos(t * f1 * 1.4 + a3) * rh * 0.2;
+
   return {
-    x: cx + Math.cos(angle) * radius * 1.45 - Math.cos(tangent) * row * 24,
-    y: cy + Math.sin(angle) * radius * 0.62 - Math.sin(tangent) * row * 24,
-    rot: tangent - 1.25,
+    x: clamp(x, cx - rw, cx + rw),
+    y: clamp(y, cy - rh, cy + rh),
+    rot: 0,
   };
 }
 
@@ -383,16 +358,99 @@ function driftPose(index: number, base: { x: number; y: number }, t: number, sin
   };
 }
 
+const CORNERS = { tl: [0, 0], tr: [1, 0], bl: [0, 1], br: [1, 1] } as const;
+const OPPOSITE: Record<string, string> = { tl: "br", tr: "bl", bl: "tr", br: "tl" };
+
+function cornerPoint(job: BuildJob, key: string) {
+  const [fx, fy] = CORNERS[(key as keyof typeof CORNERS) ?? "tl"] ?? CORNERS.tl;
+  return { x: job.x + job.w * fx, y: job.y + job.h * fy };
+}
+
 function jobStartPose(job: BuildJob): { x: number; y: number } {
-  return job.kind === "frame" || job.diagonal
-    ? { x: job.x + 3, y: job.y + 3 }
-    : { x: job.x + 3, y: job.y + job.h / 2 };
+  if (job.kind === "frame") return { x: job.x + 3, y: job.y + 3 };
+  if (job.diagonal) {
+    const p = cornerPoint(job, job.dir);
+    return { x: p.x + (p.x === job.x ? 3 : -3), y: p.y + (p.y === job.y ? 3 : -3) };
+  }
+  switch (job.dir) {
+    case "rtl":
+      return { x: job.x + job.w + 2, y: job.y + job.h / 2 };
+    case "ttb":
+      return { x: job.x + job.w / 2, y: job.y - 2 };
+    case "btt":
+      return { x: job.x + job.w / 2, y: job.y + job.h + 2 };
+    default:
+      return { x: job.x - 2, y: job.y + job.h / 2 };
+  }
 }
 
 function jobEndPose(job: BuildJob): { x: number; y: number } {
-  return job.kind === "frame" || job.diagonal
-    ? { x: job.x + job.w, y: job.y + job.h }
-    : { x: job.x + job.w, y: job.y + job.h / 2 };
+  if (job.kind === "frame") return { x: job.x + job.w, y: job.y + job.h };
+  if (job.diagonal) return cornerPoint(job, OPPOSITE[job.dir] ?? "br");
+  switch (job.dir) {
+    case "rtl":
+      return { x: job.x, y: job.y + job.h / 2 };
+    case "ttb":
+      return { x: job.x + job.w / 2, y: job.y + job.h };
+    case "btt":
+      return { x: job.x + job.w / 2, y: job.y };
+    default:
+      return { x: job.x + job.w, y: job.y + job.h / 2 };
+  }
+}
+
+/** 光标在绘制过程中的落点 */
+function drawPoint(job: BuildJob, k: number): { x: number; y: number } {
+  if (job.kind === "frame") return { x: job.x + job.w * k, y: job.y + job.h * k };
+  if (job.diagonal) {
+    const sx = job.dir === "tr" || job.dir === "br" ? 1 - k : k;
+    const sy = job.dir === "bl" || job.dir === "br" ? 1 - k : k;
+    return { x: job.x + job.w * sx, y: job.y + job.h * sy };
+  }
+  switch (job.dir) {
+    case "rtl":
+      return { x: job.x + job.w * (1 - k), y: job.y + job.h / 2 };
+    case "ttb":
+      return { x: job.x + job.w / 2, y: job.y + job.h * k };
+    case "btt":
+      return { x: job.x + job.w / 2, y: job.y + job.h * (1 - k) };
+    default:
+      return { x: job.x + job.w * k, y: job.y + job.h / 2 };
+  }
+}
+
+/** 按方向生成 clip-path */
+function clipFor(job: BuildJob, k: number): string {
+  const radius = job.kind === "frame" ? 24 : 18;
+  if (k <= 0) {
+    if (job.kind === "frame" || job.diagonal) return `inset(0 100% 100% 0 round ${radius}px)`;
+    return "inset(0 100% 0 0)";
+  }
+  if (k >= 1) return "";
+  const r = `${(1 - k) * 100}%`;
+
+  if (job.kind === "frame" || job.diagonal) {
+    switch (job.dir) {
+      case "tr":
+        return `inset(0 0 ${r} ${r} round ${radius}px)`;
+      case "bl":
+        return `inset(${r} ${r} 0 0 round ${radius}px)`;
+      case "br":
+        return `inset(${r} 0 0 ${r} round ${radius}px)`;
+      default:
+        return `inset(0 ${r} ${r} 0 round ${radius}px)`;
+    }
+  }
+  switch (job.dir) {
+    case "rtl":
+      return `inset(0 0 0 ${r})`;
+    case "ttb":
+      return `inset(0 0 ${r} 0)`;
+    case "btt":
+      return `inset(${r} 0 0 0)`;
+    default:
+      return `inset(0 ${r} 0 0)`;
+  }
 }
 
 /* ------------------------------ 测量 ------------------------------ */
@@ -435,6 +493,13 @@ function measure(root: HTMLElement, canvas: HTMLCanvasElement): Scene | null {
     .filter((card) => card.w > 0);
 
   const jobs: BuildJob[] = [];
+  const BLOCK_DIRS = ["ltr", "rtl", "ttb", "btt"] as const;
+  const CORNER_DIRS = ["tl", "tr", "bl", "br"] as const;
+  const pickDir = (item: { text: boolean; diagonal: boolean; x: number; y: number }) => {
+    if (item.text) return "ltr";
+    const seed = Math.abs(Math.round(item.x / 7) + Math.round(item.y / 11));
+    return item.diagonal ? CORNER_DIRS[seed % 4] : BLOCK_DIRS[(seed + 1) % 4];
+  };
 
   const ordered = [...cards].sort((a, b) => b.reveals.length - a.reveals.length);
   ordered.forEach((card, order) => {
@@ -449,14 +514,14 @@ function measure(root: HTMLElement, canvas: HTMLCanvasElement): Scene | null {
       dur: FRAME_DUR,
       kind: "frame",
       diagonal: true,
+      dir: "tl",
       text: false,
       chars: 0,
       cursor: -1,
-      rippled: false,
     });
 
     card.reveals.forEach((item, index) => {
-      const wave = Math.floor(index / 3);
+      const wave = Math.floor(index / 2);
       const dur = item.text ? clamp(0.55 + item.chars * 0.022, 0.6, 1.5) : REVEAL_DUR;
       jobs.push({
         el: item.el,
@@ -468,10 +533,10 @@ function measure(root: HTMLElement, canvas: HTMLCanvasElement): Scene | null {
         dur,
         kind: "reveal",
         diagonal: item.diagonal,
+        dir: pickDir(item),
         text: item.text,
         chars: item.chars,
         cursor: -1,
-        rippled: false,
       });
     });
   });
@@ -492,38 +557,48 @@ function measure(root: HTMLElement, canvas: HTMLCanvasElement): Scene | null {
       dur: clamp(0.55 + chars * 0.022, 0.6, 1.5),
       kind: "reveal",
       diagonal: false,
+      dir: "ltr",
       text: true,
       chars,
       cursor: -1,
-      rippled: false,
     });
   });
 
   jobs.sort((a, b) => a.start - b.start);
 
+  // 就近派活：在空闲光标里选「离目标最近 + 闲置最久」的一只；
+  // 若全都忙，则顺延任务等最早空出来的那只，保证光标到位后才开始画。
   const freeAt = new Array(BOARD_CURSOR).fill(0);
-  let pointer = 0;
+  const lastPos: Array<{ x: number; y: number } | null> = new Array(BOARD_CURSOR).fill(null);
+
   for (const job of jobs) {
+    const target = jobStartPose(job);
     let chosen = -1;
-    for (let step = 0; step < BOARD_CURSOR; step += 1) {
-      const c = (pointer + step) % BOARD_CURSOR;
-      if (freeAt[c] <= job.start - TRAVEL) {
+    let bestCost = Infinity;
+
+    for (let c = 0; c < BOARD_CURSOR; c += 1) {
+      if (freeAt[c] > job.start - TRAVEL) continue;
+      const from = lastPos[c] ?? homePose(c, width, height);
+      const dist = Math.hypot(from.x - target.x, from.y - target.y);
+      const cost = dist + (job.start - freeAt[c]) * 60;
+      if (cost < bestCost) {
+        bestCost = cost;
         chosen = c;
-        break;
       }
     }
+
     if (chosen < 0) {
-      let min = Infinity;
-      for (let c = 0; c < BOARD_CURSOR; c += 1) {
-        if (freeAt[c] < min) {
-          min = freeAt[c];
-          chosen = c;
-        }
+      let earliest = 0;
+      for (let c = 1; c < BOARD_CURSOR; c += 1) {
+        if (freeAt[c] < freeAt[earliest]) earliest = c;
       }
+      chosen = earliest;
+      job.start = freeAt[chosen] + TRAVEL;
     }
+
     job.cursor = chosen;
     freeAt[chosen] = job.start + job.dur;
-    pointer = (chosen + 1) % BOARD_CURSOR;
+    lastPos[chosen] = jobEndPose(job);
   }
 
   const byCursor: BuildJob[][] = Array.from({ length: WORKER_COUNT }, () => []);
@@ -540,12 +615,10 @@ function measure(root: HTMLElement, canvas: HTMLCanvasElement): Scene | null {
     width,
     height,
     shell,
-    logo: root.querySelector<HTMLElement>("[data-intro-logo]"),
     typing: root.querySelector<HTMLElement>("[data-type-target]"),
     frame,
     jobs,
     byCursor,
-    ripples: [],
   };
 }
 
@@ -585,10 +658,11 @@ function cursorPose(scene: Scene, c: number, t: number): Pose {
 
     if (active.kind === "frame" || active.diagonal) {
       const k = easeInOut(p);
+      const point = drawPoint(active, k);
       return {
-        x: active.x + active.w * k,
-        y: active.y + active.h * k,
-        tool: "cross",
+        x: point.x,
+        y: point.y,
+        tool: "arrow",
         down: true,
         alpha: 1,
         rot: 0,
@@ -614,7 +688,7 @@ function cursorPose(scene: Scene, c: number, t: number): Pose {
       return {
         x: active.x + active.w * 0.5,
         y: active.y + active.h * (1 - bottom),
-        tool: "cross",
+        tool: "arrow",
         down: true,
         alpha: 1,
         rot: 0,
@@ -623,10 +697,11 @@ function cursorPose(scene: Scene, c: number, t: number): Pose {
     }
 
     const k = easeInOut(p);
+    const point = drawPoint(active, k);
     return {
-      x: active.x + active.w * k,
-      y: active.y + active.h / 2,
-      tool: "cross",
+      x: point.x,
+      y: point.y,
+      tool: "arrow",
       down: true,
       alpha: 1,
       rot: 0,
@@ -643,7 +718,7 @@ function cursorPose(scene: Scene, c: number, t: number): Pose {
 
 /* ------------------------------ 渲染 ------------------------------ */
 function render(scene: Scene, t: number) {
-  const { ctx, width: W, height: H, shell, logo, typing, frame, jobs } = scene;
+  const { ctx, width: W, height: H, shell, typing, frame, jobs } = scene;
 
   /* 1. 桌面框 */
   const boardK = clamp01((t - T_BURST) / (T_BOARD - T_BURST));
@@ -660,15 +735,7 @@ function render(scene: Scene, t: number) {
   for (const job of jobs) {
     const p = clamp01((t - job.start) / job.dur);
 
-    if (job.kind === "frame") {
-      const k = easeInOut(p);
-      job.el.style.clipPath =
-        k <= 0
-          ? "inset(0 100% 100% 0 round 24px)"
-          : k >= 1
-            ? ""
-            : `inset(0 ${(1 - k) * 100}% ${(1 - k) * 100}% 0 round 24px)`;
-    } else if (job.text) {
+    if (job.text) {
       const typeP = clamp01(p / TYPE_SHARE);
       const chars = Math.max(1, job.chars);
       const typed = Math.ceil(typeP * chars) / chars;
@@ -681,24 +748,7 @@ function render(scene: Scene, t: number) {
       const k = easeInOut(p);
       job.el.style.opacity = k <= 0 ? "0" : "1";
       job.el.style.transform = "";
-      if (job.diagonal) {
-        job.el.style.clipPath =
-          k <= 0 ? "inset(0 100% 100% 0 round 18px)" : k >= 1 ? "" : `inset(0 ${(1 - k) * 100}% ${(1 - k) * 100}% 0 round 18px)`;
-      } else {
-        job.el.style.clipPath = k <= 0 ? "inset(0 100% 0 0)" : k >= 1 ? "" : `inset(0 ${(1 - k) * 100}% 0 0)`;
-      }
-    }
-
-    if (t < job.start) job.rippled = false;
-    if (!job.rippled && t >= job.start + job.dur) {
-      job.rippled = true;
-      scene.ripples.push({
-        x: job.kind === "frame" || job.diagonal ? job.x + job.w : job.x + job.w,
-        y: job.kind === "frame" || job.diagonal ? job.y + job.h : job.y + job.h / 2,
-        color: job.kind === "frame" ? "#0D99FF" : "#9747FF",
-        born: t,
-        size: job.kind === "frame" ? 26 : 16,
-      });
+      job.el.style.clipPath = clipFor(job, k);
     }
   }
 
@@ -709,16 +759,7 @@ function render(scene: Scene, t: number) {
     if (typing.textContent !== text) typing.textContent = text;
   }
 
-  /* 4. Logo */
-  if (logo) {
-    const inK = clamp01(t / 0.4);
-    const outK = clamp01((t - T_INTRO) / 0.45);
-    const alpha = inK * (1 - outK);
-    logo.style.opacity = String(alpha);
-    logo.style.transform = `scale(${lerp(0.86, 1, easeOut(inK)) * lerp(1, 0.72, easeOut(outK))})`;
-  }
-
-  /* 5. 画布 */
+  /* 4. 画布 */
   ctx.clearRect(0, 0, W, H);
 
   /* 桌面框选框 */
@@ -774,35 +815,22 @@ function render(scene: Scene, t: number) {
     }
   }
 
-  /* 涟漪 */
-  scene.ripples = scene.ripples.filter((r) => t - r.born < 0.65);
-  for (const r of scene.ripples) {
-    const p = clamp01((t - r.born) / 0.65);
-    ctx.globalAlpha = (1 - p) * 0.55;
-    ctx.beginPath();
-    ctx.arc(r.x, r.y, 6 + p * r.size, 0, Math.PI * 2);
-    ctx.strokeStyle = r.color;
-    ctx.lineWidth = 2 * (1 - p) + 0.5;
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-  }
-
   /* 光标 */
   for (let c = 0; c < WORKER_COUNT; c += 1) {
     let pose: Pose;
 
     if (t < T_INTRO) {
-      const o = orbitPose(c, t, W, H);
-      pose = { ...o, tool: "arrow", down: false, alpha: 1, scale: 1 };
+      const o = wanderPose(c, t, W, H);
+      pose = { ...o, tool: "arrow", down: false, alpha: clamp01(t / 0.35), scale: 1 };
     } else if (t < T_BURST) {
-      const a = orbitPose(c, T_INTRO, W, H);
+      const a = wanderPose(c, T_INTRO, W, H);
       const home =
         c === BOARD_CURSOR && frame ? { x: frame.x + 10, y: frame.y + 10 } : homePose(c, W, H);
       const k = easeInOut((t - T_INTRO) / (T_BURST - T_INTRO));
       pose = {
         x: lerp(a.x, home.x, k),
         y: lerp(a.y, home.y, k),
-        rot: a.rot * (1 - k),
+        rot: 0,
         tool: "arrow",
         down: false,
         alpha: 1,
@@ -817,7 +845,7 @@ function render(scene: Scene, t: number) {
         pose = {
           x: base.x + inset + (base.w - inset * 2) * k,
           y: base.y + inset + (base.h - inset * 2) * k,
-          tool: "cross",
+          tool: "arrow",
           down: boardK < 1,
           alpha: 1,
           rot: 0,
@@ -870,8 +898,6 @@ export interface CursorCanvasLayerProps {
   speed?: number;
   /** 跳过环绕与页面拉框，直接开始搭建 */
   skipIntro?: boolean;
-  /** 显示工具状态 / 进度 / 暂停 / 重播 */
-  showToolbar?: boolean;
   /** 阶段切换回调 */
   onPhaseChange?: (phase: IntroPhase) => void;
   /** 用户主动重播时触发 */
@@ -881,13 +907,6 @@ export interface CursorCanvasLayerProps {
   /** 覆盖系统的减少动效偏好 */
   reducedMotion?: boolean;
 }
-
-const PHASE_LABEL: Record<IntroPhase, string> = {
-  intro: "环绕",
-  burst: "散开",
-  board: "拉框",
-  build: "搭建",
-};
 
 function phaseOf(t: number): IntroPhase {
   if (t < T_INTRO) return "intro";
@@ -901,7 +920,6 @@ export function CursorCanvasLayer({
   playing = true,
   speed = 1,
   skipIntro = false,
-  showToolbar = true,
   onPhaseChange,
   onReplay,
   height = 760,
@@ -918,8 +936,6 @@ export function CursorCanvasLayer({
   const playingRef = useRef(playing);
   const speedRef = useRef(clamp(speed, 0.25, 2));
   const phaseRef = useRef<IntroPhase>(phaseOf(skipIntro ? T_BOARD : 0));
-  const pctRef = useRef<HTMLSpanElement>(null);
-  const phaseElRef = useRef<HTMLSpanElement>(null);
   const [exiting, setExiting] = useState(false);
   const exitedRef = useRef(false);
   const [isPlaying, setIsPlaying] = useState(playing);
@@ -948,8 +964,6 @@ export function CursorCanvasLayer({
 
   const syncChrome = useCallback(
     (t: number) => {
-      if (pctRef.current) pctRef.current.textContent = `${Math.round((t / T_TOTAL) * 100)}%`;
-      if (phaseElRef.current) phaseElRef.current.textContent = PHASE_LABEL[phaseOf(t)];
       const next = phaseOf(t);
       if (next !== phaseRef.current) {
         phaseRef.current = next;
@@ -969,7 +983,6 @@ export function CursorCanvasLayer({
     onReplay?.();
     const scene = sceneRef.current;
     if (scene) {
-      scene.ripples = [];
       render(scene, 0);
       syncChrome(0);
     }
@@ -1051,7 +1064,6 @@ export function CursorCanvasLayer({
     const onResize = () => {
       const next = measure(root, canvas);
       if (next) {
-        next.ripples = sceneRef.current?.ripples ?? [];
         sceneRef.current = next;
         render(next, clockRef.current);
       }
@@ -1091,56 +1103,7 @@ export function CursorCanvasLayer({
         </div>
       </div>
 
-      <div className="absolute inset-0 z-10 flex items-center justify-center">
-        <div
-          data-intro-logo=""
-          className="flex h-16 w-16 items-center justify-center rounded-[22px] bg-ink opacity-0 shadow-[0_16px_40px_rgba(44,42,41,0.22)]"
-        >
-          <span className="h-5 w-5 rotate-45 rounded-[5px] border-2 border-white" />
-        </div>
-      </div>
-
       <canvas ref={canvasRef} className="absolute inset-0 z-20 h-full w-full" />
-
-      {showToolbar ? (
-        <div
-          data-intro-toolbar=""
-          className="pointer-events-auto absolute bottom-5 left-1/2 z-30 flex -translate-x-1/2 items-center gap-3 rounded-full border border-[#ECECEE] bg-card px-3.5 py-1.5 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_30px_rgba(0,0,0,0.04)]"
-        >
-          <span
-            ref={phaseElRef}
-            data-intro-phase=""
-            className="w-8 text-center text-[10px] font-medium uppercase tracking-[0.14em] text-ink"
-          >
-            {PHASE_LABEL[phaseRef.current]}
-          </span>
-          <span className="h-3 w-px bg-[#EDE9E2]" />
-          <span
-            ref={pctRef}
-            data-intro-pct=""
-            className="w-9 text-right text-[10px] tabular-nums text-muted"
-          >
-            0%
-          </span>
-          <span className="h-3 w-px bg-[#EDE9E2]" />
-          <button
-            type="button"
-            onClick={() => setIsPlaying((v) => !v)}
-            aria-label={isPlaying ? "暂停" : "继续"}
-            className="flex h-6 w-6 items-center justify-center rounded-full text-ink transition-colors duration-300 hover:bg-card-soft"
-          >
-            {isPlaying ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
-          </button>
-          <button
-            type="button"
-            onClick={replay}
-            aria-label="重播"
-            className="flex h-6 w-6 items-center justify-center rounded-full text-ink transition-colors duration-300 hover:bg-card-soft"
-          >
-            <RotateCcw className="h-3 w-3" />
-          </button>
-        </div>
-      ) : null}
     </motion.div>
   );
 }
