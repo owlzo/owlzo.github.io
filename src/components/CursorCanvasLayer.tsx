@@ -34,7 +34,7 @@ const FRAME_DUR = 0.6;
 const REVEAL_DUR = 0.5;
 const WAVE_GAP = 0.45;
 const TRAVEL = 0.36;
-const T_TOTAL = 5.05;
+const T_TOTAL = 5.2;
 const EXIT_FADE = 0.6;
 
 const WORKER_COUNT = PAL.length;
@@ -487,7 +487,13 @@ function measure(root: HTMLElement, canvas: HTMLCanvasElement): Scene | null {
             chars,
           };
         })
-        .sort((a, b) => (Math.abs(a.y - b.y) > 8 ? a.y - b.y : a.x - b.x));
+        .sort((a, b) => {
+          // 角标 / 装饰类内容（data-reveal-last）排在最后，避免挤占正文那一波
+          const al = a.el.hasAttribute("data-reveal-last") ? 1 : 0;
+          const bl = b.el.hasAttribute("data-reveal-last") ? 1 : 0;
+          if (al !== bl) return al - bl;
+          return Math.abs(a.y - b.y) > 8 ? a.y - b.y : a.x - b.x;
+        });
       return { el, x: rect.x, y: rect.y, w: rect.width, h: rect.height, reveals };
     })
     .filter((card) => card.w > 0);

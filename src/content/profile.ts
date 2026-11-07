@@ -65,11 +65,12 @@ export interface ProfileConfig {
   /** 留言弹窗 */
   contact: {
     button: string;
-    title: string;
-    subtitle: string;
-    placeholders: string[];
     hint: string;
     success: string;
+    /** 微信号（会编码成二维码） */
+    wechat: string;
+    /** 可选：换成你自己的二维码图片，如 `/art/wechat-qr.png` */
+    wechatQr?: string;
   };
   /** 底部社交（FloatingDock） */
   socials: SocialItem[];
@@ -133,16 +134,10 @@ export const profile: ProfileConfig = {
 
   contact: {
     button: "说些什么",
-    title: "说点什么",
-    subtitle: "想法、合作、或者一句吐槽，都可以。",
-    placeholders: [
-      "想聊点什么？",
-      "最近在做什么项目？",
-      "要不要一起做点什么？",
-      "有什么想法丢给我？",
-    ],
     hint: "Enter 发送 · Esc 关闭",
     success: "收到了，我会尽快回复。",
+    wechat: "owlzo",
+    wechatQr: "",
   },
 
   socials: [
@@ -152,3 +147,6 @@ export const profile: ProfileConfig = {
     { label: "抖音", href: "https://www.douyin.com", icon: "douyin" },
   ],
 };
+
+
+

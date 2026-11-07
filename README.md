@@ -25,8 +25,9 @@
 | 构建 | Vite 8 + React 19 + TypeScript 7 |
 | 样式 | Tailwind CSS 3 |
 | 动效 | Framer Motion + Canvas 2D（开场光标层） |
-| 组件 | Magic UI（BentoGrid / BorderBeam / InteractiveHoverButton）、Aceternity（FloatingDock / 3D Card / PlaceholdersAndVanishInput）、cult-ui（BackgroundImageTexture） |
+| 组件 | Magic UI（BentoGrid / BorderBeam / InteractiveHoverButton / ComicText）、Aceternity（FloatingDock / 3D Card / TooltipCard）、cult-ui（Typewriter / BackgroundImageTexture） |
 | 文档 | Markdown + `marked` |
+| 二维码 | `qrcode`（运行时生成矩阵 → 单条 SVG path，不存图片） |
 
 ## 快速开始
 
@@ -150,8 +151,8 @@ cover: "/covers/raycast.svg"
 
 ## 浏览器要求
 
-Chrome / Edge / Firefox ≥ 111，Safari ≥ 16.4（依赖 `:has`、`color-mix` 之外的基础能力与现代 CSS 变量）。
-视图为桌面优先：< 1024px 时布局会退化为单列，作品目录收成右下角胶囊。
+桌面优先：Chrome / Edge / Firefox 最新两个大版本、Safari ≥ 16.4。
+< 1024px 时布局退化为单列，作品目录收成右下角胶囊。
 
 ## 第三方与许可
 
